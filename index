@@ -1409,8 +1409,10 @@ function getProjectTeamCost(proj) {
 function totalMonthlyIncome() {
   // Ingresos de proyectos: en MXN + IVA cobrado al cliente
   const projIncome   = projects.reduce((s,p) => s + incomeInMXN(p) * (1 + IVA), 0);
-  // Proveedores: solo el margen (cobro - costo), ya incluye IVA si aplica
-  const vendorMargin = vendors.reduce((s,v) => s + ((v.charge||0) - (v.cost||0)), 0);
+  // Proveedores: solo los ACTIVOS — si no están activos no se cobra ni se gasta
+  const vendorMargin = vendors
+    .filter(isVendorActive)
+    .reduce((s,v) => s + ((v.charge||0) - (v.cost||0)), 0);
   return projIncome + vendorMargin;
 }
 
@@ -1646,8 +1648,8 @@ function renderAlerts() {
     else if (hrs === 0)  alerts.push({ type:'idle', msg: `${emp.name} no tiene horas asignadas este mes.` });
   });
 
-  // Vendors with negative margin
-  vendors.forEach(v => {
+  // Vendors with negative margin (only active ones)
+  vendors.filter(isVendorActive).forEach(v => {
     if ((v.charge||0) < (v.cost||0)) {
       alerts.push({ type:'over', msg: `Proveedor "${v.name}": se cobra menos de lo que cuesta (costo ${fmt(v.cost)} vs cobro ${fmt(v.charge)}).` });
     }
@@ -1765,7 +1767,7 @@ function renderProfitability() {
   panel.innerHTML = projects.map(p => {
     const income    = incomeInMXN(p) * (1 + IVA); // ingreso con IVA
     const teamCost  = getProjectTeamCost(p) * (1 + IVA); // costo equipo con IVA
-    const vendCost  = vendors.filter(v=>v.projectId===p.id).reduce((s,v)=>s+(v.cost||0),0);
+    const vendCost  = vendors.filter(v=>v.projectId===p.id&&isVendorActive(v)).reduce((s,v)=>s+(v.cost||0),0);
     const totalCost = teamCost + vendCost;
     const margin    = income - totalCost;
     const marginPct = income > 0 ? (margin/income*100).toFixed(1) : '—';
@@ -1908,18 +1910,22 @@ function renderProjects() {
       </div>`;
     }).join('');
 
-    const projVendors = vendors.filter(v => v.projectId === p.id);
-    const vendorHTML = projVendors.length ? projVendors.map(v => `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--paper-2)">
+    const projVendors = vendors.filter(v => v.projectId === p.id && isVendorActive(v));
+    const allProjVendors = vendors.filter(v => v.projectId === p.id);
+    const vendorHTML = allProjVendors.length ? allProjVendors.map(v => {
+      const vActive = isVendorActive(v);
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--paper-2);opacity:${vActive?1:.45}">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:.9rem">📦</span>
           <span style="font-size:.82rem">${v.name}</span>
+          ${!vActive ? '<span style="font-size:.65rem;background:var(--paper-2);color:var(--ink-soft);padding:1px 6px;border-radius:10px">⏸ Inactivo este mes</span>' : ''}
         </div>
         <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-family:var(--mono);font-size:.78rem;color:var(--accent-2)">Costo: ${fmt(v.cost)}</span>
-          <span style="font-family:var(--mono);font-size:.78rem;color:var(--green)">Cobro: ${fmt(v.charge)}</span>
+          <span style="font-family:var(--mono);font-size:.78rem;color:var(--accent-2)">${vActive?'Costo: '+fmt(v.cost):'—'}</span>
+          <span style="font-family:var(--mono);font-size:.78rem;color:var(--green)">${vActive?'Cobro: '+fmt(v.charge):'—'}</span>
         </div>
-      </div>`).join('') : '';
+      </div>`;
+    }).join('') : '';
 
     const teamCost = getProjectTeamCost(p);
     const teamCostIva  = teamCost * (1 + IVA);   // costo real pagado (con IVA)
@@ -3606,7 +3612,7 @@ function exportMonthlyReport() {
     const inc    = incomeInMXN(p);
     const incIva = inc * (1 + IVA);
     const cost   = getProjectTeamCost(p) * (1 + IVA);
-    const vCost  = vendors.filter(function(v){return v.projectId===p.id;}).reduce(function(s,v){return s+(v.cost||0);},0);
+    const vCost  = vendors.filter(function(v){return v.projectId===p.id&&isVendorActive(v);}).reduce(function(s,v){return s+(v.cost||0);},0);
     const margin = incIva - cost - vCost;
     const mPct   = incIva > 0 ? (margin/incIva*100).toFixed(1) : '--';
     const tCls   = p.type==='iguala' ? 'pill-blue' : 'pill-gold';
@@ -3641,7 +3647,7 @@ function exportMonthlyReport() {
   let profitRows = '';
   projects.forEach(function(p) {
     const inc2   = incomeInMXN(p)*(1+IVA);
-    const cost2  = getProjectTeamCost(p)*(1+IVA) + vendors.filter(function(v){return v.projectId===p.id;}).reduce(function(s,v){return s+(v.cost||0);},0);
+    const cost2  = getProjectTeamCost(p)*(1+IVA) + vendors.filter(function(v){return v.projectId===p.id&&isVendorActive(v);}).reduce(function(s,v){return s+(v.cost||0);},0);
     const margin2= inc2 - cost2;
     const mPct2  = inc2 > 0 ? (margin2/inc2*100).toFixed(1) : '0';
     const incW   = (inc2/maxInc2*100).toFixed(1);

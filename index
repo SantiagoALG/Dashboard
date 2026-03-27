@@ -1107,8 +1107,8 @@ select { cursor: pointer; }
 // SUPABASE CONFIG
 // Reemplaza estos valores con los de tu proyecto en supabase.com
 // ══════════════════════════════════════════════════════
-const SUPABASE_URL  = 'TU_SUPABASE_URL';   // ej. https://xxxx.supabase.co
-const SUPABASE_KEY  = 'TU_ANON_PUBLIC_KEY'; // Settings → API → anon public
+const SUPABASE_URL  = 'https://njocteicmmscpinfcgxc.supabase.co';
+const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qb2N0ZWljbW1zY3BpbmZjZ3hjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTExNDcsImV4cCI6MjA5MDE2NzE0N30.IuR17io-7_9jMkqJS3puFfhiAebwb1lTqvOt91RtcU0';
 
 // Supabase REST helper
 async function sbFetch(table, method='GET', body=null, filters='') {

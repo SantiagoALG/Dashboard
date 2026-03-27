@@ -1143,16 +1143,21 @@ async function loadFromSupabase() {
       sbFetch('alg_expenses'),
     ]);
 
-    employees  = (emps  ||[]).map(r => ({ ...r.data, id: r.id }));
-    corporates = (corps ||[]).map(r => ({ ...r.data, id: r.id, _combined: r.is_combined }));
-    projects   = (projs ||[]).map(r => ({ ...r.data, id: r.id }));
-    vendors    = (vends ||[]).map(r => ({ ...r.data, id: r.id }));
-    expenses   = (exps  ||[]).map(r => ({ ...r.data, id: r.id }));
+    // Supabase returns rows with { id, data, is_combined? }
+    // Spread data fields and override with the real Supabase id
+    const mapRow = (r) => ({ ...(r.data || {}), id: r.id });
+    employees  = (emps  ||[]).map(mapRow);
+    corporates = (corps ||[]).map(r => ({ ...(r.data||{}), id: r.id, _combined: !!r.is_combined }));
+    projects   = (projs ||[]).map(mapRow);
+    vendors    = (vends ||[]).map(mapRow);
+    expenses   = (exps  ||[]).map(mapRow);
 
-    // Sync idCounter to avoid collisions
-    const allIds = [...employees, ...corporates, ...projects, ...vendors, ...expenses]
-      .map(x => x.id).filter(n => typeof n === 'number');
-    if (allIds.length) idCounter = Math.max(...allIds) + 1;
+    // Keep local idCounter well above Supabase's max to avoid collisions
+    const allIds = [
+      ...(emps||[]), ...(corps||[]), ...(projs||[]), ...(vends||[]), ...(exps||[])
+    ].map(r => r.id).filter(n => typeof n === 'number');
+    const maxSbId = allIds.length ? Math.max(...allIds) : 0;
+    idCounter = Math.max(idCounter, maxSbId + 1, 1000000);
 
     renderAll();
     showSyncStatus('ok');
@@ -1164,21 +1169,46 @@ async function loadFromSupabase() {
 }
 
 // ── SAVE HELPERS ────────────────────────────────────
-async function sbUpsert(table, record) {
-  const { id, ...data } = record;
+// All writes go to Supabase, then we reload to get the canonical state
+// (including Supabase-generated IDs). This avoids local/remote ID drift.
+
+async function sbSave(table, record) {
+  // Strip local-only display fields that shouldn't go to DB
+  const { _open, _showBd, _fromCotizador, _fromCot, _combined, _cat, ...rest } = record;
+  const { id, ...data } = rest;
   try {
-    if (id && typeof id === 'number' && id > 0) {
+    showSyncStatus('syncing');
+    if (id && typeof id === 'number' && id > 1000000) {
+      // Local temp ID (our uid() counter) — this is a new record, POST it
+      await sbFetch(table, 'POST', { data });
+    } else if (id) {
+      // Real Supabase ID — PATCH it
       await sbFetch(table, 'PATCH', { data }, `?id=eq.${id}`);
     } else {
-      const res = await sbFetch(table, 'POST', { data });
-      if (res?.[0]?.id) record.id = res[0].id;
+      await sbFetch(table, 'POST', { data });
     }
-  } catch(e) { console.error('sbUpsert error:', e); }
+    // Reload everything from Supabase to get canonical IDs
+    await loadFromSupabase();
+  } catch(e) {
+    console.error('sbSave error:', e);
+    showSyncStatus('error', e.message);
+  }
+}
+
+async function sbUpsert(table, record) {
+  // Legacy alias — just use sbSave
+  return sbSave(table, record);
 }
 
 async function sbDelete(table, id) {
-  try { await sbFetch(table, 'DELETE', null, `?id=eq.${id}`); }
-  catch(e) { console.error('sbDelete error:', e); }
+  try {
+    showSyncStatus('syncing');
+    await sbFetch(table, 'DELETE', null, `?id=eq.${id}`);
+    await loadFromSupabase();
+  } catch(e) {
+    console.error('sbDelete error:', e);
+    showSyncStatus('error', e.message);
+  }
 }
 
 // Sync status indicator
@@ -1214,7 +1244,10 @@ let _activeScenario = 'A'; // 'A' | 'B' | 'all'
 let _projPanelOpen  = false;
 let _pqAssignRows   = [];
 
-let idCounter = 1;
+// Local temp IDs start at 1,000,000 so they never collide with
+// Supabase bigserial IDs (which start at 1 and grow slowly).
+// After sbSave, Supabase IDs replace local ones via loadFromSupabase().
+let idCounter = 1000000;
 const uid = () => idCounter++;
 
 // Edit mode
@@ -2340,9 +2373,12 @@ function saveProject() {
     projects.push(proj);
   }
   closeModal('project');
-  renderAll();
   const savedProj = editingProjectId ? projects.find(p=>p.id===editingProjectId) : projects[projects.length-1];
-  if (SUPABASE_READY && savedProj) sbUpsert('alg_projects', savedProj).then(()=>showSyncStatus('ok'));
+  if (SUPABASE_READY && savedProj) {
+    sbSave('alg_projects', savedProj);
+  } else {
+    renderAll();
+  }
   showToast(`Proyecto "${name}" guardado ✓`);
 }
 
@@ -2351,8 +2387,11 @@ function deleteProject(id) {
   if (!p || !confirm(`¿Eliminar el proyecto "${p.name}"?`)) return;
   projects = projects.filter(x => x.id !== id);
   vendors  = vendors.map(v => v.projectId === id ? {...v, projectId: null} : v);
-  renderAll();
-  if (SUPABASE_READY) sbDelete('alg_projects', id).then(()=>showSyncStatus('ok'));
+  if (SUPABASE_READY) {
+    sbDelete('alg_projects', id);
+  } else {
+    renderAll();
+  }
 }
 
 // ── EMPLOYEE CRUD ──────────────────────
@@ -2414,7 +2453,17 @@ function saveEditEmployee() {
   if (isCorporate) corporates.push({...base, _combined: isCombined});
 
   closeModal('edit-employee');
-  renderAll();
+  if (SUPABASE_READY) {
+    // Save all affected records
+    const updEmp  = employees.find(e=>e.id===_editEmpId);
+    const updCorp = corporates.find(c=>c.id===_editEmpId);
+    const saves = [];
+    if (updEmp)  saves.push(sbSave('alg_employees',  updEmp));
+    if (updCorp) saves.push(sbSave('alg_corporates', updCorp));
+    if (!saves.length) renderAll();
+  } else {
+    renderAll();
+  }
   showToast(`${name} actualizado ✓`);
 }
 
@@ -2428,8 +2477,12 @@ function saveEmployee() {
     salary: parseFloat(document.getElementById('e-salary').value) || 0,
   });
   closeModal('employee');
-  renderAll();
-  if (SUPABASE_READY) sbUpsert('alg_employees', employees[employees.length-1]).then(()=>showSyncStatus('ok'));
+  const newEmp = employees[employees.length-1];
+  if (SUPABASE_READY) {
+    sbSave('alg_employees', newEmp); // reloads after save
+  } else {
+    renderAll();
+  }
   showToast(`${name} agregado ✓`);
 }
 
@@ -2438,8 +2491,11 @@ function deleteEmployee(id) {
   if (!e || !confirm(`¿Eliminar a "${e.name}"?`)) return;
   employees = employees.filter(x => x.id !== id);
   projects  = projects.map(p => ({...p, assignments: p.assignments.filter(a => a.empId !== id)}));
-  renderAll();
-  if (SUPABASE_READY) sbDelete('alg_employees', id).then(()=>showSyncStatus('ok'));
+  if (SUPABASE_READY) {
+    sbDelete('alg_employees', id); // reloads after delete
+  } else {
+    renderAll();
+  }
 }
 
 // ── CORPORATE CRUD ─────────────────────
@@ -2453,15 +2509,22 @@ function saveCorporate() {
     salary: parseFloat(document.getElementById('c-salary').value) || 0,
   });
   closeModal('corporate');
-  renderAll();
-  if (SUPABASE_READY) sbUpsert('alg_corporates', corporates[corporates.length-1]).then(()=>showSyncStatus('ok'));
+  const newCorp = corporates[corporates.length-1];
+  if (SUPABASE_READY) {
+    sbSave('alg_corporates', newCorp);
+  } else {
+    renderAll();
+  }
   showToast(`${name} agregado ✓`);
 }
 
 function deleteCorporate(id) {
   corporates = corporates.filter(x => x.id !== id);
-  renderAll();
-  if (SUPABASE_READY) sbDelete('alg_corporates', id).then(()=>showSyncStatus('ok'));
+  if (SUPABASE_READY) {
+    sbDelete('alg_corporates', id);
+  } else {
+    renderAll();
+  }
 }
 
 // ── VENDOR CRUD ────────────────────────
@@ -2494,15 +2557,22 @@ function saveVendor() {
     charge:    parseFloat(document.getElementById('v-charge').value) || 0,
   });
   closeModal('vendor');
-  renderAll();
-  if (SUPABASE_READY) sbUpsert('alg_vendors', vendors[vendors.length-1]).then(()=>showSyncStatus('ok'));
+  const newVendor = vendors[vendors.length-1];
+  if (SUPABASE_READY) {
+    sbSave('alg_vendors', newVendor);
+  } else {
+    renderAll();
+  }
   showToast(`Proveedor "${name}" agregado ✓`);
 }
 
 function deleteVendor(id) {
   vendors = vendors.filter(x => x.id !== id);
-  renderAll();
-  if (SUPABASE_READY) sbDelete('alg_vendors', id).then(()=>showSyncStatus('ok'));
+  if (SUPABASE_READY) {
+    sbDelete('alg_vendors', id);
+  } else {
+    renderAll();
+  }
 }
 
 // ── EXPENSES CRUD ──────────────────────
@@ -2516,16 +2586,22 @@ const EXP_CATS = [
 function addExpenseRow() {
   const newExp = { id: uid(), cat:'suscripcion', desc:'', amount:0, hasIva:true, recurrent:true };
   expenses.push(newExp);
-  renderExpensesPage();
-  renderDashboard();
-  if (SUPABASE_READY) sbUpsert('alg_expenses', newExp).then(()=>showSyncStatus('ok'));
+  if (SUPABASE_READY) {
+    sbSave('alg_expenses', newExp);
+  } else {
+    renderExpensesPage();
+    renderDashboard();
+  }
 }
 
 function deleteExpense(id) {
   expenses = expenses.filter(e => e.id !== id);
-  renderExpensesPage();
-  renderDashboard();
-  if (SUPABASE_READY) sbDelete('alg_expenses', id).then(()=>showSyncStatus('ok'));
+  if (SUPABASE_READY) {
+    sbDelete('alg_expenses', id);
+  } else {
+    renderExpensesPage();
+    renderDashboard();
+  }
 }
 
 function updateExpense(id, field, value) {
@@ -2542,8 +2618,8 @@ function updateExpense(id, field, value) {
     clearTimeout(window._expSyncTimer);
     window._expSyncTimer = setTimeout(() => {
       const e = expenses.find(x=>x.id===id);
-      if (e) sbUpsert('alg_expenses', e).then(()=>showSyncStatus('ok'));
-    }, 800);
+      if (e) sbSave('alg_expenses', e);
+    }, 1200);
   }
 }
 

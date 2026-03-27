@@ -1173,26 +1173,34 @@ async function loadFromSupabase() {
 }
 
 // ── SAVE HELPERS ────────────────────────────────────
-// All writes go to Supabase, then we reload to get the canonical state
-// (including Supabase-generated IDs). This avoids local/remote ID drift.
+// Strategy: render locally immediately (fast UX), then sync to Supabase
+// in the background. On reload, Supabase is the source of truth.
+
+function stripLocalFields(record) {
+  // Remove runtime-only fields that shouldn't be stored
+  const { _open, _showBd, _fromCotizador, _fromCot, _cat } = record;
+  const clean = { ...record };
+  delete clean._open; delete clean._showBd;
+  delete clean._fromCotizador; delete clean._fromCot; delete clean._cat;
+  return clean;
+}
 
 async function sbSave(table, record) {
-  // Strip local-only display fields that shouldn't go to DB
-  const { _open, _showBd, _fromCotizador, _fromCot, _combined, _cat, ...rest } = record;
-  const { id, ...data } = rest;
+  const clean = stripLocalFields(record);
+  const { id, ...data } = clean;
   try {
     showSyncStatus('syncing');
-    if (id && typeof id === 'number' && id > 1000000) {
-      // Local temp ID (our uid() counter) — this is a new record, POST it
-      await sbFetch(table, 'POST', { data });
-    } else if (id) {
-      // Real Supabase ID — PATCH it
-      await sbFetch(table, 'PATCH', { data }, `?id=eq.${id}`);
+    const isNew = !id || (typeof id === 'number' && id >= 1000000);
+    if (isNew) {
+      const res = await sbFetch(table, 'POST', { data });
+      // Update the record's id with Supabase-generated id
+      if (res && res[0] && res[0].id) {
+        record.id = res[0].id;
+      }
     } else {
-      await sbFetch(table, 'POST', { data });
+      await sbFetch(table, 'PATCH', { data }, `?id=eq.${id}`);
     }
-    // Reload everything from Supabase to get canonical IDs
-    await loadFromSupabase();
+    showSyncStatus('ok');
   } catch(e) {
     console.error('sbSave error:', e);
     showSyncStatus('error', e.message);
@@ -1200,7 +1208,6 @@ async function sbSave(table, record) {
 }
 
 async function sbUpsert(table, record) {
-  // Legacy alias — just use sbSave
   return sbSave(table, record);
 }
 
@@ -1208,7 +1215,7 @@ async function sbDelete(table, id) {
   try {
     showSyncStatus('syncing');
     await sbFetch(table, 'DELETE', null, `?id=eq.${id}`);
-    await loadFromSupabase();
+    showSyncStatus('ok');
   } catch(e) {
     console.error('sbDelete error:', e);
     showSyncStatus('error', e.message);
@@ -2377,13 +2384,14 @@ function saveProject() {
     projects.push(proj);
   }
   closeModal('project');
-  const savedProj = editingProjectId ? projects.find(p=>p.id===editingProjectId) : projects[projects.length-1];
-  if (SUPABASE_READY && savedProj) {
-    sbSave('alg_projects', savedProj);
-  } else {
-    renderAll();
-  }
+  renderAll();
   showToast(`Proyecto "${name}" guardado ✓`);
+  if (SUPABASE_READY) {
+    const savedProj = editingProjectId
+      ? projects.find(p => p.id === editingProjectId)
+      : projects[projects.length-1];
+    if (savedProj) sbSave('alg_projects', savedProj);
+  }
 }
 
 function deleteProject(id) {
@@ -2391,11 +2399,8 @@ function deleteProject(id) {
   if (!p || !confirm(`¿Eliminar el proyecto "${p.name}"?`)) return;
   projects = projects.filter(x => x.id !== id);
   vendors  = vendors.map(v => v.projectId === id ? {...v, projectId: null} : v);
-  if (SUPABASE_READY) {
-    sbDelete('alg_projects', id);
-  } else {
-    renderAll();
-  }
+  renderAll();
+  if (SUPABASE_READY) sbDelete('alg_projects', id);
 }
 
 // ── EMPLOYEE CRUD ──────────────────────
@@ -2457,18 +2462,14 @@ function saveEditEmployee() {
   if (isCorporate) corporates.push({...base, _combined: isCombined});
 
   closeModal('edit-employee');
-  if (SUPABASE_READY) {
-    // Save all affected records
-    const updEmp  = employees.find(e=>e.id===_editEmpId);
-    const updCorp = corporates.find(c=>c.id===_editEmpId);
-    const saves = [];
-    if (updEmp)  saves.push(sbSave('alg_employees',  updEmp));
-    if (updCorp) saves.push(sbSave('alg_corporates', updCorp));
-    if (!saves.length) renderAll();
-  } else {
-    renderAll();
-  }
+  renderAll();
   showToast(`${name} actualizado ✓`);
+  if (SUPABASE_READY) {
+    const updEmp  = employees.find(e => e.id === _editEmpId);
+    const updCorp = corporates.find(c => c.id === _editEmpId);
+    if (updEmp)  sbSave('alg_employees',  updEmp);
+    if (updCorp) sbSave('alg_corporates', updCorp);
+  }
 }
 
 function saveEmployee() {
@@ -2481,13 +2482,9 @@ function saveEmployee() {
     salary: parseFloat(document.getElementById('e-salary').value) || 0,
   });
   closeModal('employee');
-  const newEmp = employees[employees.length-1];
-  if (SUPABASE_READY) {
-    sbSave('alg_employees', newEmp); // reloads after save
-  } else {
-    renderAll();
-  }
+  renderAll();
   showToast(`${name} agregado ✓`);
+  if (SUPABASE_READY) sbSave('alg_employees', employees[employees.length-1]);
 }
 
 function deleteEmployee(id) {
@@ -2495,11 +2492,8 @@ function deleteEmployee(id) {
   if (!e || !confirm(`¿Eliminar a "${e.name}"?`)) return;
   employees = employees.filter(x => x.id !== id);
   projects  = projects.map(p => ({...p, assignments: p.assignments.filter(a => a.empId !== id)}));
-  if (SUPABASE_READY) {
-    sbDelete('alg_employees', id); // reloads after delete
-  } else {
-    renderAll();
-  }
+  renderAll();
+  if (SUPABASE_READY) sbDelete('alg_employees', id);
 }
 
 // ── CORPORATE CRUD ─────────────────────
@@ -2513,22 +2507,15 @@ function saveCorporate() {
     salary: parseFloat(document.getElementById('c-salary').value) || 0,
   });
   closeModal('corporate');
-  const newCorp = corporates[corporates.length-1];
-  if (SUPABASE_READY) {
-    sbSave('alg_corporates', newCorp);
-  } else {
-    renderAll();
-  }
+  renderAll();
   showToast(`${name} agregado ✓`);
+  if (SUPABASE_READY) sbSave('alg_corporates', corporates[corporates.length-1]);
 }
 
 function deleteCorporate(id) {
   corporates = corporates.filter(x => x.id !== id);
-  if (SUPABASE_READY) {
-    sbDelete('alg_corporates', id);
-  } else {
-    renderAll();
-  }
+  renderAll();
+  if (SUPABASE_READY) sbDelete('alg_corporates', id);
 }
 
 // ── VENDOR CRUD ────────────────────────
@@ -2561,22 +2548,15 @@ function saveVendor() {
     charge:    parseFloat(document.getElementById('v-charge').value) || 0,
   });
   closeModal('vendor');
-  const newVendor = vendors[vendors.length-1];
-  if (SUPABASE_READY) {
-    sbSave('alg_vendors', newVendor);
-  } else {
-    renderAll();
-  }
+  renderAll();
   showToast(`Proveedor "${name}" agregado ✓`);
+  if (SUPABASE_READY) sbSave('alg_vendors', vendors[vendors.length-1]);
 }
 
 function deleteVendor(id) {
   vendors = vendors.filter(x => x.id !== id);
-  if (SUPABASE_READY) {
-    sbDelete('alg_vendors', id);
-  } else {
-    renderAll();
-  }
+  renderAll();
+  if (SUPABASE_READY) sbDelete('alg_vendors', id);
 }
 
 // ── EXPENSES CRUD ──────────────────────
@@ -2590,22 +2570,16 @@ const EXP_CATS = [
 function addExpenseRow() {
   const newExp = { id: uid(), cat:'suscripcion', desc:'', amount:0, hasIva:true, recurrent:true };
   expenses.push(newExp);
-  if (SUPABASE_READY) {
-    sbSave('alg_expenses', newExp);
-  } else {
-    renderExpensesPage();
-    renderDashboard();
-  }
+  renderExpensesPage();
+  renderDashboard();
+  if (SUPABASE_READY) sbSave('alg_expenses', newExp);
 }
 
 function deleteExpense(id) {
   expenses = expenses.filter(e => e.id !== id);
-  if (SUPABASE_READY) {
-    sbDelete('alg_expenses', id);
-  } else {
-    renderExpensesPage();
-    renderDashboard();
-  }
+  renderExpensesPage();
+  renderDashboard();
+  if (SUPABASE_READY) sbDelete('alg_expenses', id);
 }
 
 function updateExpense(id, field, value) {

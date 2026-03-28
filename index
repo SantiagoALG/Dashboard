@@ -688,9 +688,6 @@ select { cursor: pointer; }
             <th class="r">Honorarios/mes</th>
             <th class="r">Hrs asignadas</th>
             <th class="r">% Ocupación</th>
-            <th class="r" style="width:50px">OH</th>
-            <th class="r" style="width:50px">Util</th>
-            <th class="r">Costo real</th>
             <th>Estado</th>
             <th style="width:60px"></th>
           </tr>

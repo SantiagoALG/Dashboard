@@ -688,8 +688,10 @@ select { cursor: pointer; }
             <th class="r">Honorarios/mes</th>
             <th class="r">Hrs asignadas</th>
             <th class="r">% Ocupación</th>
+            <th class="r" style="width:50px">OH</th>
+            <th class="r" style="width:50px">Util</th>
+            <th class="r">Costo real</th>
             <th>Estado</th>
-            <th class="r">Con IVA</th>
             <th style="width:60px"></th>
           </tr>
         </thead>
@@ -905,12 +907,33 @@ select { cursor: pointer; }
       </div>
       <div class="field-group">
         <label>Rol / Especialidad</label>
-        <input type="text" id="e-role" placeholder="Ej. Diseñador Senior">
+        <input type="text" id="e-role" placeholder="Ej. Diseñadora Senior">
       </div>
     </div>
-    <div class="field-group">
-      <label>Honorarios mensuales ($)</label>
-      <input type="number" id="e-salary" placeholder="0" min="0" step="1000">
+    <div class="field-row">
+      <div class="field-group">
+        <label>Honorarios mensuales ($)</label>
+        <input type="number" id="e-salary" placeholder="0" min="0" step="1000">
+      </div>
+      <div class="field-group">
+        <label>Overhead (×) — estándar: 1.5</label>
+        <input type="number" id="e-overhead" value="1.5" min="0" max="3" step="0.1" style="font-family:var(--mono)">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field-group">
+        <label>Utilidad (%) — estándar: 50</label>
+        <input type="number" id="e-util" value="50" min="0" max="99" step="1" style="font-family:var(--mono)">
+      </div>
+      <div style="padding-top:20px;font-size:.72rem;color:var(--ink-soft)">
+        Implant recomendado: <strong>0–20%</strong>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0">
+      <input type="checkbox" id="e-implant" style="width:16px;height:16px;cursor:pointer">
+      <label for="e-implant" style="font-size:.82rem;cursor:pointer">
+        <strong>Implant</strong> — trabaja exclusivamente en una cuenta cliente (overhead reducido)
+      </label>
     </div>
     <div class="modal-footer">
       <button class="btn-cancel" onclick="closeModal('employee')">Cancelar</button>
@@ -1021,16 +1044,55 @@ select { cursor: pointer; }
         </select>
       </div>
     </div>
-    <div style="background:var(--paper-2);border-radius:6px;padding:12px 14px;margin-top:4px">
-      <div style="font-size:.72rem;color:var(--ink-soft);margin-bottom:6px;font-weight:600">COSTO REAL CON IVA</div>
+    <!-- Implant + Overhead -->
+    <div style="border:1.5px solid var(--paper-3);border-radius:6px;overflow:hidden;margin-top:4px">
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--paper-2);border-bottom:1px solid var(--paper-3)">
+        <div style="flex:1">
+          <div style="font-size:.78rem;font-weight:700;color:var(--ink)">Implant</div>
+          <div style="font-size:.68rem;color:var(--ink-soft)">Trabaja exclusivamente en una cuenta cliente</div>
+        </div>
+        <button id="ee-implant-btn" onclick="toggleImplant()"
+          style="padding:5px 16px;border-radius:20px;font-family:var(--sans);font-size:.78rem;font-weight:700;cursor:pointer;border:2px solid var(--paper-3);background:transparent;color:var(--ink-soft);transition:all .15s">
+          No implant
+        </button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 14px">
+        <div class="field-group" style="margin:0">
+          <label>Overhead (×)</label>
+          <input type="number" id="ee-overhead" value="1.5" min="0" max="3" step="0.1"
+            style="font-family:var(--mono)" oninput="updateEePreview()">
+        </div>
+        <div class="field-group" style="margin:0">
+          <label>Utilidad (%)</label>
+          <input type="number" id="ee-util" value="50" min="0" max="99" step="1"
+            style="font-family:var(--mono)" oninput="updateEePreview()">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 14px 10px;font-size:.68rem;color:var(--ink-soft)">
+        <div>Estándar: <strong>1.5×</strong> · Implant: <strong>0.2×</strong></div>
+        <div>Estándar: <strong>50%</strong> · Implant: <strong>0–20%</strong></div>
+      </div>
+    </div>
+
+    <div style="background:var(--paper-2);border-radius:6px;padding:12px 14px;margin-top:8px">
+      <div style="font-size:.72rem;color:var(--ink-soft);margin-bottom:6px;font-weight:600">PREVIEW DE COSTO Y PRECIO</div>
       <div style="display:flex;justify-content:space-between;font-size:.82rem">
         <span>Honorarios base:</span><span id="ee-base-preview" style="font-family:var(--mono)">$0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.82rem;color:var(--ink-soft)">
+        <span>Overhead (<span id="ee-overhead-label">1.5×</span>):</span>
+        <span id="ee-overhead-preview" style="font-family:var(--mono)">$0</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:.82rem;color:var(--amber)">
         <span>IVA 16%:</span><span id="ee-iva-preview" style="font-family:var(--mono)">$0</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:.88rem;font-weight:700;margin-top:6px;padding-top:6px;border-top:1px solid var(--paper-3)">
-        <span>Total mensual:</span><span id="ee-total-preview" style="font-family:var(--mono);color:var(--ink)">$0</span>
+        <span>Costo total (OH + IVA):</span>
+        <span id="ee-total-preview" style="font-family:var(--mono);color:var(--accent-2)">$0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.88rem;font-weight:700;margin-top:4px">
+        <span>Precio de venta (<span id="ee-util-label">50%</span> util):</span>
+        <span id="ee-precio-preview" style="font-family:var(--mono);color:var(--green)">$0</span>
       </div>
     </div>
     <div class="modal-footer">
@@ -1373,32 +1435,47 @@ const JUNTAS_RATE    = 30000 / 120;  // $250/hr
 const OVERHEAD_RATE  = 1.5;
 const UTIL_RATE      = 0.5;
 
-// Costo real de una hora según tipo y tarifa
-// Formula Cotizador: costoDir = hrs×rate, overhead = costoDir×1.5
-// costoTotal = costoDir + overhead, precioLleno = costoTotal / (1-0.5)
-function calcHrCost(hrs, rate) {
+// Costo real de una hora según tipo, tarifa y overhead del colaborador
+// Formula: costoDir = hrs×rate, overhead = costoDir×overheadRate
+// costoTotal = costoDir + overhead, precioLleno = costoTotal / (1-utilRate)
+function calcHrCost(hrs, rate, overheadRate, utilRate) {
+  const oh  = overheadRate != null ? overheadRate : OVERHEAD_RATE;
+  const ut  = utilRate     != null ? utilRate     : UTIL_RATE;
   const costoDir   = hrs * rate;
-  const overhead   = costoDir * OVERHEAD_RATE;
+  const overhead   = costoDir * oh;
   const costoTotal = costoDir + overhead;
   return { costoDir, overhead, costoTotal,
-           precioLleno: costoTotal / (1 - UTIL_RATE) };
+           precioLleno: ut < 1 ? costoTotal / (1 - ut) : costoTotal * 2 };
+}
+
+// Per-employee overhead and util (fall back to globals if not set)
+function getEmpOverhead(emp) {
+  if (emp == null) return OVERHEAD_RATE;
+  return (emp.overhead != null) ? emp.overhead : OVERHEAD_RATE;
+}
+function getEmpUtil(emp) {
+  if (emp == null) return UTIL_RATE;
+  return (emp.util != null) ? emp.util / 100 : UTIL_RATE;
 }
 
 // Costo de equipo asignado (producción únicamente, sin IVA)
+// Uses per-employee overhead for implants
 function getProjectTeamCost(proj) {
   const prodCost = (proj.assignments||[]).reduce((s, a) => {
-    const emp = employees.find(e => e.id === a.empId);
+    const emp     = employees.find(e => e.id === a.empId);
     if (!emp) return s;
     const empRate = (emp.salary || 0) / CAP;
+    const oh      = getEmpOverhead(emp);
+    const ut      = getEmpUtil(emp);
     if (a.breakdown && a.breakdown.length > 0) {
       return s + a.breakdown.reduce((bs, b) => {
-        return bs + calcHrCost(b.hrs || 0, empRate).costoTotal;
+        return bs + calcHrCost(b.hrs || 0, empRate, oh, ut).costoTotal;
       }, 0);
     }
-    return s + calcHrCost(a.hrs || 0, empRate).costoTotal;
+    return s + calcHrCost(a.hrs || 0, empRate, oh, ut).costoTotal;
   }, 0);
 
-  // Juntas: bloque separado del proyecto con tarifa JUNTAS**
+  // Juntas: tarifa JUNTAS** con overhead global (no es implant)
   const juntasCost = proj.juntas && proj.juntas.hrs > 0
     ? calcHrCost(proj.juntas.hrs, JUNTAS_RATE).costoTotal
     : 0;
@@ -1876,7 +1953,7 @@ function renderProjects() {
           <div style="font-size:.58rem;font-weight:700;text-transform:uppercase;color:var(--ink-soft);padding:3px 6px;background:var(--paper-2);text-align:right">C.Total</div>
         </div>
         ${a.breakdown.map(b=>{
-          const calc  = calcHrCost(b.hrs||0, empRateForDetail);
+          const calc  = calcHrCost(b.hrs||0, empRateForDetail, getEmpOverhead(empForCost), getEmpUtil(empForCost));
           const isJ   = false; // juntas now in separate block
           return `<div style="display:grid;grid-template-columns:auto 1fr repeat(3,70px);gap:0;border:1px solid var(--paper-3);border-top:none;border-radius:0;overflow:hidden">
             <div style="padding:4px 6px;border-right:1px solid var(--paper-2);display:flex;align-items:center">
@@ -2512,9 +2589,15 @@ function openEditEmployee(id, cat) {
   _editEmpId  = id;
   _editEmpCat = cat;
 
-  document.getElementById('ee-name').value   = person.name || '';
-  document.getElementById('ee-role').value   = person.role || '';
-  document.getElementById('ee-salary').value = person.salary || '';
+  document.getElementById('ee-name').value     = person.name     || '';
+  document.getElementById('ee-role').value     = person.role     || '';
+  document.getElementById('ee-salary').value   = person.salary   || '';
+  document.getElementById('ee-overhead').value = person.overhead != null ? person.overhead : OVERHEAD_RATE;
+  document.getElementById('ee-util').value     = person.util     != null ? person.util     : 50;
+
+  // Set implant button state
+  _editIsImplant = !!person.implant;
+  refreshImplantBtn();
 
   // determine type
   let typeVal = 'billable';
@@ -2525,12 +2608,56 @@ function openEditEmployee(id, cat) {
   document.getElementById('modal-edit-employee').classList.add('open');
 }
 
+let _editIsImplant = false;
+
+function toggleImplant() {
+  _editIsImplant = !_editIsImplant;
+  if (_editIsImplant) {
+    const curOh = parseFloat(document.getElementById('ee-overhead').value);
+    if (curOh >= OVERHEAD_RATE) document.getElementById('ee-overhead').value = '0.2';
+    const curUt = parseFloat(document.getElementById('ee-util').value);
+    if (curUt >= 50) document.getElementById('ee-util').value = '10';
+  } else {
+    document.getElementById('ee-overhead').value = OVERHEAD_RATE;
+    document.getElementById('ee-util').value      = '50';
+  }
+  refreshImplantBtn();
+  updateEePreview();
+}
+
+function refreshImplantBtn() {
+  const btn = document.getElementById('ee-implant-btn');
+  if (!btn) return;
+  if (_editIsImplant) {
+    btn.textContent    = '✅ Implant';
+    btn.style.background   = 'var(--green-bg)';
+    btn.style.color        = 'var(--green)';
+    btn.style.borderColor  = 'var(--green)';
+  } else {
+    btn.textContent    = 'No implant';
+    btn.style.background   = 'transparent';
+    btn.style.color        = 'var(--ink-soft)';
+    btn.style.borderColor  = 'var(--paper-3)';
+  }
+}
+
 function updateEePreview() {
-  const base = parseFloat(document.getElementById('ee-salary').value) || 0;
-  const iva  = base * IVA;
-  document.getElementById('ee-base-preview').textContent  = fmt(base);
-  document.getElementById('ee-iva-preview').textContent   = fmt(iva);
-  document.getElementById('ee-total-preview').textContent = fmt(base + iva);
+  const base        = parseFloat(document.getElementById('ee-salary').value)   || 0;
+  const oh          = parseFloat(document.getElementById('ee-overhead').value)  ?? OVERHEAD_RATE;
+  const utilPct     = parseFloat(document.getElementById('ee-util').value)      ?? 50;
+  const utilRate    = utilPct / 100;
+  const overheadAmt = base * oh;
+  const withOh      = base + overheadAmt;
+  const iva         = withOh * IVA;
+  const costoTotal  = withOh + iva;
+  const precioVenta = utilRate < 1 ? costoTotal / (1 - utilRate) : costoTotal * 2;
+  document.getElementById('ee-base-preview').textContent     = fmt(base);
+  document.getElementById('ee-overhead-label').textContent   = oh + '×';
+  document.getElementById('ee-overhead-preview').textContent = fmt(overheadAmt);
+  document.getElementById('ee-iva-preview').textContent      = fmt(iva);
+  document.getElementById('ee-total-preview').textContent    = fmt(costoTotal);
+  document.getElementById('ee-util-label').textContent       = utilPct + '%';
+  document.getElementById('ee-precio-preview').textContent   = fmt(precioVenta);
 }
 
 document.getElementById('ee-salary').addEventListener('input', updateEePreview);
@@ -2553,7 +2680,9 @@ function saveEditEmployee() {
   employees  = employees.filter(e => e.id !== _editEmpId);
   corporates = corporates.filter(c => c.id !== _editEmpId);
 
-  const base = { id: _editEmpId, name, role, salary, _combined: isCombined };
+  const overhead = parseFloat(document.getElementById('ee-overhead').value) ?? OVERHEAD_RATE;
+  const util     = parseFloat(document.getElementById('ee-util').value)     ?? 50;
+  const base = { id: _editEmpId, name, role, salary, overhead, util, implant: _editIsImplant, _combined: isCombined };
 
   if (isBillable)  employees.push({...base});
   if (isCorporate) corporates.push({...base, _combined: isCombined});
@@ -2572,11 +2701,15 @@ function saveEditEmployee() {
 function saveEmployee() {
   const name = document.getElementById('e-name').value.trim();
   if (!name) { showToast('Escribe el nombre del colaborador'); return; }
+  const isImpl = document.getElementById('e-implant').checked;
   employees.push({
-    id:     uid(),
+    id:       uid(),
     name,
-    role:   document.getElementById('e-role').value.trim(),
-    salary: parseFloat(document.getElementById('e-salary').value) || 0,
+    role:     document.getElementById('e-role').value.trim(),
+    salary:   parseFloat(document.getElementById('e-salary').value)   || 0,
+    overhead: parseFloat(document.getElementById('e-overhead').value) ?? OVERHEAD_RATE,
+    util:     parseFloat(document.getElementById('e-util').value)     ?? 50,
+    implant:  isImpl,
   });
   closeModal('employee');
   renderAll();

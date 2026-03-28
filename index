@@ -1083,13 +1083,18 @@ select { cursor: pointer; }
       <div style="display:flex;justify-content:space-between;font-size:.82rem;color:var(--amber)">
         <span>IVA 16%:</span><span id="ee-iva-preview" style="font-family:var(--mono)">$0</span>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:.88rem;font-weight:700;margin-top:6px;padding-top:6px;border-top:1px solid var(--paper-3)">
-        <span>Costo total (OH + IVA):</span>
+      <div style="display:flex;justify-content:space-between;font-size:.82rem;font-weight:700;margin-top:6px;padding-top:6px;border-top:1px solid var(--paper-3)">
+        <span>Costo real ALG (base + OH + IVA):</span>
         <span id="ee-total-preview" style="font-family:var(--mono);color:var(--accent-2)">$0</span>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:.88rem;font-weight:700;margin-top:4px">
-        <span>Precio de venta (<span id="ee-util-label">50%</span> util):</span>
+      <div style="height:1px;background:var(--paper-3);margin:6px 0"></div>
+      <div style="display:flex;justify-content:space-between;font-size:.82rem">
+        <span>Precio sin IVA (<span id="ee-util-label">50%</span> util):</span>
         <span id="ee-precio-preview" style="font-family:var(--mono);color:var(--green)">$0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.88rem;font-weight:700;margin-top:3px">
+        <span>Precio de venta al cliente (+ IVA):</span>
+        <span id="ee-precio-iva-preview" style="font-family:var(--mono);color:var(--green)">$0</span>
       </div>
     </div>
     <div class="modal-footer">
@@ -2643,18 +2648,27 @@ function updateEePreview() {
   const oh          = parseFloat(document.getElementById('ee-overhead').value)  ?? OVERHEAD_RATE;
   const utilPct     = parseFloat(document.getElementById('ee-util').value)      ?? 50;
   const utilRate    = utilPct / 100;
-  const overheadAmt = base * oh;
-  const withOh      = base + overheadAmt;
-  const iva         = withOh * IVA;
-  const costoTotal  = withOh + iva;
-  const precioVenta = utilRate < 1 ? costoTotal / (1 - utilRate) : costoTotal * 2;
+
+  // Fórmula idéntica al Cotizador:
+  // 1. costoDir + overhead = costoTotal (sin IVA)
+  // 2. precioSinIva = costoTotal / (1 - util)
+  // 3. precioConIva = precioSinIva × 1.16
+  const overheadAmt  = base * oh;
+  const costoTotal   = base + overheadAmt;                                    // sin IVA
+  const ivaAlg       = costoTotal * IVA;                                      // IVA sobre costo ALG
+  const costoConIva  = costoTotal + ivaAlg;                                   // lo que cuesta a ALG
+  const precioSinIva = utilRate < 1 ? costoTotal / (1 - utilRate) : costoTotal * 2;
+  const precioConIva = precioSinIva * (1 + IVA);                              // lo que se cobra al cliente
+
   document.getElementById('ee-base-preview').textContent     = fmt(base);
   document.getElementById('ee-overhead-label').textContent   = oh + '×';
   document.getElementById('ee-overhead-preview').textContent = fmt(overheadAmt);
-  document.getElementById('ee-iva-preview').textContent      = fmt(iva);
-  document.getElementById('ee-total-preview').textContent    = fmt(costoTotal);
+  document.getElementById('ee-iva-preview').textContent      = fmt(ivaAlg);
+  document.getElementById('ee-total-preview').textContent    = fmt(costoConIva);
   document.getElementById('ee-util-label').textContent       = utilPct + '%';
-  document.getElementById('ee-precio-preview').textContent   = fmt(precioVenta);
+  document.getElementById('ee-precio-preview').textContent     = fmt(precioSinIva);
+  const precioIvaEl = document.getElementById('ee-precio-iva-preview');
+  if (precioIvaEl) precioIvaEl.textContent = fmt(precioConIva);
 }
 
 document.getElementById('ee-salary').addEventListener('input', updateEePreview);
